@@ -14,5 +14,7 @@ This repository consists of the `wall_follower` ROS package. It enables the Turt
 5. The program exits after the robot exits the maze.
 ```    
     
+## Maze
+The maze to be solved is shown below:    
 
 <img width="530" alt="maze1" src="https://user-images.githubusercontent.com/48079888/93161689-0cbcdd80-f6e1-11ea-9ea1-279541866914.PNG">
