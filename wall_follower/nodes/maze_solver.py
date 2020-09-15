@@ -14,9 +14,8 @@ rospy.init_node("move_robot")
 pub = rospy.Publisher("cmd_vel", Twist, queue_size=5)
 velocity_msg = Twist()
 
-# we publish the velocity at 4 Hz (4 times per second)
+# we publish the velocity at 50 Hz (50 times per second)
 rate = rospy.Rate(50)
-rate1 = rospy.Rate(2)
 
 # initialize transformation frames
 tf_listener = tf.TransformListener()
@@ -24,16 +23,14 @@ odom_frame = 'odom'
 base_frame = 'base_footprint'
 
 try:
-    tf_listener.waitForTransform(odom_frame, 'base_footprint',
-                                 rospy.Time(), rospy.Duration(1.0))
+    tf_listener.waitForTransform(odom_frame, 'base_footprint', rospy.Time(), rospy.Duration(1.0))
     base_frame = 'base_footprint'
 except (tf.Exception, tf.ConnectivityException, tf.LookupException):
     try:
-        tf_listener.waitForTransform(odom_frame, 'base_link',
-                                     rospy.Time(), rospy.Duration(1.0))
+        tf_listener.waitForTransform(odom_frame, 'base_link', rospy.Time(), rospy.Duration(1.0))
         base_frame = 'base_link'
     except (tf.Exception, tf.ConnectivityException, tf.LookupException):
-        rospy.loginfo("Cannot find transform between odom and base_link")
+        rospy.loginfo("Cannot find transform between odom and base_link or base_footprint")
         rospy.signal_shutdown("tf Exception")
 
 
@@ -68,7 +65,6 @@ def go_straight(linear_velocity):
     # publish velocity message
     pub.publish(velocity_msg)
     rate.sleep()
-
 
 def rotate(relative_angle_degree, angular_velocity):
     """ function to rotate a robot by a given degree
@@ -106,7 +102,7 @@ def rotate(relative_angle_degree, angular_velocity):
 
 
 def get_odom_data():
-    """ function to get odometry data
+    """ function to get odometry data 
     """
     try:
         (trans, rot) = tf_listener.lookupTransform(odom_frame, base_frame, rospy.Time(0))
@@ -165,6 +161,10 @@ def sensor_callback(msg):
     right_91 = msg.ranges[269]
 
 
+# initialize subscriber
+rospy.Subscriber("scan", LaserScan, sensor_callback)
+
+
 def find_wall():
     """function to find the closest wall
 
@@ -192,6 +192,16 @@ def find_wall():
     rospy.loginfo('Closest wall found on {} of the robot at a distance of {}'.format(nearest_wall,obstacle_dict[nearest_wall]))
     # distance of nearest wall
     distance = obstacle_dict[nearest_wall]
+
+    # give preference to left wall
+    if abs(distance - left_90) <= 5:
+        nearest_wall = 'left'
+        distance = obstacle_dict[nearest_wall]
+
+    # 2nd preference to the wall behind the robot
+    elif abs(distance - back) <= 5:
+        nearest_wall = 'back'
+        distance = obstacle_dict[nearest_wall]
     return nearest_wall, distance
 
 
@@ -245,8 +255,8 @@ def check_left_turn():
         True of False - whether left turn is available or not
     """
 
-    # distance of object at front left(45 degree from front)
-    left2 = (left_44 + left_45 + left_46) / 3
+    # distance of object at front left
+    left2 = (left_44 + left_45 + left_46)/3
     if front > 1.0 and left2 > 1.0:
         return True
     else:
@@ -266,15 +276,12 @@ def check_right_turn():
     else:
         return False
 
-
-# initialize subscriber
-rospy.Subscriber("scan", LaserScan, sensor_callback)
-
 # goal location
-goal_x, goal_y = (15.82, 3.8)
+goal_x,goal_y = (15.82, 3.8)
 
 wall_found = False
 error_prev = 0
+
 # parameters for PD controller
 Kp = 2
 Kd = 0.4
@@ -289,8 +296,12 @@ while True:
     # distance to goal
     distance_to_goal = compute_distance(position.x, position.y, goal_x, goal_y)
     # break if goal has been reached
-    if distance_to_goal <= 0.2:
+    if distance_to_goal <= 1:
         rospy.loginfo('Goal has been reached')
+        # stop the robot
+        velocity_msg.linear.x = 0
+        velocity_msg.angular.z = 0
+        pub.publish(velocity_msg)
         break
 
     # find wall
@@ -305,7 +316,11 @@ while True:
     elif check_left_turn():
         rospy.loginfo('left turn detected')
         # if turn possible, go straight until turn is reached
-        go_straight(0.1)
+        if front > 0.25:
+            go_straight(0.1)
+        else:
+            rotate(-90, -0.2)
+
         if left_90 > 1.5 and left_110 > 1.5:
             # rotate 90 towards left (anticlockwise)
             rotate(90, 0.2)
@@ -319,7 +334,7 @@ while True:
         left1 = (left_44 + left_45 + left_46)/3
         # ratio of distance at left and front left of the robot
         # secant of the angle
-        orientation = left1 / left_90
+        orientation = left1/left_90
         max_angular = 0.1
         rospy.loginfo('distance at left {}'.format(left_90))
         # 1.414 is square root of 2
@@ -338,7 +353,7 @@ while True:
             rospy.loginfo('adjusting by turning left')
             velocity_msg.linear.x = 0
             # angular velocity using PD control
-            velocity_msg.angular.z = 1.5*max_angular * ((Kp * error) + Kd * (error - error_prev) / 0.05)
+            velocity_msg.angular.z = 1.5*max_angular * ((Kp * error) + Kd * (error - error_prev)/0.05)
 
         # if robot is pointed towards the wall
         elif orientation < 1.39:
@@ -358,8 +373,6 @@ while True:
     # turn around if path is blocked
     else:
         rotate(180, 0.2)
-
-
 
 
 
